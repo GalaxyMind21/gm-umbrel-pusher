@@ -1,29 +1,46 @@
 // Payout-integrity check, to be added to gm-discord-bot api/ingest.js (reviewed here, deployed separately).
-// 1) validPool(): allow optional "payout": add "payout" to the optional keys and `("payout" in p && !validPayout(p.payout))`.
-// 2) ingestPool(): when sender === "umbrel" && p.payout, call `await payoutCheck(p.payout, now)` (before saving state).
-// Env (Vercel, sensitive): PAYOUT_EXPECTED_JSON = {"<rig>":[{"h":"<32hex>","from"?:ISO,"until"?:ISO,"note"?:str}]}
-// Status lives in blob pi/status.json; served (rig ids + states only, no hashes) by api/payout-status.js to the box alerter.
+// Wiring (exact):
+//   import { validPayout, payoutCheck } from "../lib/payout-check.js";
+//   validPool(): add "payout" to optional keys and `|| ("payout" in p && !validPayout(p.payout))`
+//   ingestPool(): if (sender === "umbrel") await payoutCheck(p.payout || [], now, { loadJson, putJson });
+//     loadJson(path) -> parsed JSON or null; putJson(path, obj) -> writes it. Both must use the PRIVATE blob store
+//     (see README) at statusPath(), never a public/guessable URL.
+// Env (Vercel, all SENSITIVE): PAYOUT_EXPECTED_JSON = {"<rig>":[{"h":"<32hex>","from"?:ISO,"until"?:ISO,"label"?:"direct"|"mrr"|"home"}]}
+//   (no renter names: any other key, incl. "note", is rejected), PAYOUT_BLOB_SECRET (64 hex), PAYOUT_STATUS_TOKEN (>=32 chars).
+export const statusPath = () => {
+  const s = process.env.PAYOUT_BLOB_SECRET || "";
+  if (!/^[0-9a-f]{64}$/.test(s)) throw new Error("PAYOUT_BLOB_SECRET");
+  return `pi/${s}/status.json`;
+};
 export const validPayout = a => Array.isArray(a) && a.length <= 6 && a.every(x => x && typeof x === "object" && !Array.isArray(x) &&
-  typeof x.id === "string" && /^[a-z0-9_-]{1,20}$/.test(x.id) &&
-  ((Object.keys(x).length === 2 && typeof x.h === "string" && /^[0-9a-f]{32}$/.test(x.h)) ||
-   (Object.keys(x).length === 2 && (x.s === "none" || x.s === "err"))));
+  Object.keys(x).length === 2 && typeof x.id === "string" && /^[a-z0-9_-]{1,20}$/.test(x.id) &&
+  ((typeof x.h === "string" && /^[0-9a-f]{32}$/.test(x.h)) || x.s === "none" || x.s === "err"));
+const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
+export function loadExpected(raw) {
+  const e = JSON.parse(raw || "{}");
+  for (const [k, list] of Object.entries(e)) {
+    if (!/^[a-z0-9_-]{1,20}$/.test(k) || !Array.isArray(list) || !list.length) throw new Error("PAYOUT_EXPECTED_JSON rig " + k);
+    for (const x of list) if (!x || Object.keys(x).some(f => !["h", "from", "until", "label"].includes(f)) || !/^[0-9a-f]{32}$/.test(x.h) ||
+      ("from" in x && !ISO.test(x.from)) || ("until" in x && !ISO.test(x.until)) || ("label" in x && !["direct", "mrr", "home"].includes(x.label)))
+      throw new Error("PAYOUT_EXPECTED_JSON entry " + k);
+  }
+  return e;
+}
 const active = (e, t) => (!e.from || t >= Date.parse(e.from)) && (!e.until || t < Date.parse(e.until));
-// Returns per-rig state: ok | mismatch | none | err | unconfigured. "mismatch" needs 2 consecutive pushes (~2 min) to fire.
+export const BAD = ["mismatch", "missing", "unconfigured", "none", "err"];
+// Every expected rig AND every pushed rig gets a state. Debounce: mismatch/missing/unconfigured 2 pushes (~2 min), none/err 5.
 export function judge(payout, expected, prev, nowMs) {
-  const out = {};
-  for (const x of payout) {
-    const exp = (expected[x.id] || []).filter(e => active(e, nowMs));
-    let s = !expected[x.id] ? "unconfigured" : x.s ? x.s : exp.some(e => e.h === x.h) ? "ok" : "mismatch";
-    const p = prev[x.id] || {}, n = s === p.raw ? (p.n || 0) + 1 : 1;
-    // err/none/mismatch only become the alerting state after 2 (mismatch) or 5 (err/none, ~5 min) in a row
-    const need = s === "mismatch" ? 2 : s === "err" || s === "none" ? 5 : 1;
-    out[x.id] = { raw: s, n, state: n >= need ? s : (p.state || "ok"), since: s === p.raw ? p.since : nowMs };
+  const got = Object.fromEntries(payout.map(x => [x.id, x])), out = {};
+  for (const id of new Set([...Object.keys(expected), ...Object.keys(got)])) {
+    const x = got[id], exp = (expected[id] || []).filter(e => active(e, nowMs));
+    const s = !x ? "missing" : !expected[id] ? "unconfigured" : x.s ? x.s : exp.some(e => e.h === x.h) ? "ok" : "mismatch";
+    const p = prev[id] || {}, n = s === p.raw ? (p.n || 0) + 1 : 1, need = s === "ok" ? 1 : s === "none" || s === "err" ? 5 : 2;
+    out[id] = { raw: s, n, state: n >= need ? s : (p.state || "ok"), since: s === p.raw ? p.since : nowMs };
   }
   return out;
 }
 export async function payoutCheck(payout, now, { loadJson, putJson }) {
-  const expected = JSON.parse(process.env.PAYOUT_EXPECTED_JSON || "{}");
-  const prev = (await loadJson("pi/status.json")) || { rigs: {} };
-  const rigs = judge(payout, expected, prev.rigs || {}, now * 1000);
-  await putJson("pi/status.json", { at: now, rigs });
+  const expected = loadExpected(process.env.PAYOUT_EXPECTED_JSON);
+  const prev = (await loadJson(statusPath())) || { rigs: {} };
+  await putJson(statusPath(), { at: now, rigs: judge(payout, expected, prev.rigs || {}, now * 1000) });
 }
