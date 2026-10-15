@@ -34,3 +34,14 @@ Emergency revoke: remove the env var on Vercel and redeploy; every push from tha
 ## Updating the image
 Merge to `main` → Actions builds `sha-<commit>` → copy the digest from the run summary → bump the `image:` digest
 and `version` in `gm-umbrel-store/galaxymind-pusher/` (PR) → update the app in the Umbrel UI. Log it in CHANGES.log first.
+
+## Home-rig switcher (separate container, disabled by default)
+`switcher/` is its own image and container; the pusher is unchanged and stays isolated. Off unless `GM_SWITCH_ENABLED=1`.
+- Outbound only: polls a job feed; no listener, no ports. urllib redirects and proxies disabled.
+- Feed is verified with **Ed25519 over the raw body bytes** before parsing. The Umbrel holds only the public key
+  (`GM_SWITCH_PUBKEY`); the private key is kept off Vercel. Envelope binds `sender` + `aud` + `ts`.
+- Jobs are exactly `{id, rig, profile, exp}`; anything else (url/user/pass) is rejected. Pool profiles live in Umbrel settings.
+- Replay: executed IDs persisted (marked before acting), `exp` must be within now..now+300s, max 1 switch per rig per 45 min.
+- Targets: exact-IP allowlist (`GM_SWITCH_ALLOW`), RFC1918 only; loopback, 10.21.21.0/24, link-local and `GM_SWITCH_DENY`
+  (gateway, Umbrel) refused. `GM_SWITCH_DENY_RIGS` blocks rented rigs; `avalonq*` always denied.
+- Snapshots the prior pool, verifies the new one, rolls back on failure, removes cgminer pools it added, ntfy on failure.
