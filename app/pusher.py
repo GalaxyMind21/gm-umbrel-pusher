@@ -4,7 +4,7 @@ Reads Public Pool every GM_INTERVAL s, keeps an allowlist of fields, sends an HM
 Env: GM_HMAC_KEY (secret, from Umbrel app settings), GM_WALLETS (comma list of customer wallets),
      GM_SENDER (umbrel|box), GM_POOL_URL (default http://host.docker.internal:2019/api),
      GM_INGEST_URL (default https://gm-discord-bot.vercel.app/api/ingest), GM_INTERVAL (default 60), GM_ONCE=1 to run once."""
-import hashlib, hmac, json, os, re, sys, time, urllib.request
+import hashlib, hmac, json, os, re, socket, statistics, sys, time, urllib.request
 POOL = os.environ.get("GM_POOL_URL", "http://host.docker.internal:2019/api").rstrip("/")
 INGEST = os.environ.get("GM_INGEST_URL", "https://gm-discord-bot.vercel.app/api/ingest")
 SENDER = os.environ.get("GM_SENDER", "umbrel")
@@ -34,13 +34,43 @@ def worker(w):
     name, ls, st = str(w["name"]), str(w["lastSeen"]), str(w["startTime"])
     if not NAME.match(name) or not ISO.match(ls) or not ISO.match(st): return None  # drop, never rewrite
     return {"name": name, "hs": num(w["hashRate"]), "best": num(w["bestDifficulty"]), "last_seen": ls, "start": st}
+# Pool response-time probe: real, measured, outbound only. TCP connect + stratum mining.subscribe round trip to the
+# pool the customer rigs mine on (GM_STRATUM, default the local Public Pool). Median of 3, refreshed every 5 min.
+# No shares are submitted and no credentials are sent. Returns None on failure (never estimated).
+STRATUM = os.environ.get("GM_STRATUM", "host.docker.internal:2018")
+_probe = {"at": 0, "v": None}
+def _once(host, port):
+    t0 = time.perf_counter()
+    with socket.create_connection((host, port), timeout=5) as s:
+        t1 = time.perf_counter(); s.settimeout(5)
+        s.sendall(b'{"id":1,"method":"mining.subscribe","params":["gm-probe/1"]}\n')
+        buf = b""
+        while b"\n" not in buf and len(buf) < 8192:
+            c = s.recv(4096)
+            if not c: break
+            buf += c
+        t2 = time.perf_counter()
+    if b'"result"' not in buf: raise IOError("no subscribe result")
+    return (t1 - t0) * 1000, (t2 - t1) * 1000
+def probe():
+    if time.time() - _probe["at"] < 300: return _probe["v"]
+    _probe["at"] = time.time()
+    try:
+        host, port = STRATUM.rsplit(":", 1); r = [_once(host, int(port)) for _ in range(3)]
+        _probe["v"] = {"connect_ms": round(statistics.median(x[0] for x in r), 1), "subscribe_ms": round(statistics.median(x[1] for x in r), 1)}
+    except Exception as e:
+        log("probe failed", type(e).__name__); _probe["v"] = None
+    return _probe["v"]
 def snapshot(ws):
     net = get("/network")
     out = []
     for a in ws:
         cl = get("/client/" + a)
         out.append({"addr": a, "workers": [x for x in (worker(w) for w in (cl.get("workers") or [])[:20]) if x]})
-    return {"v": 1, "kind": "pool", "at": int(time.time()), "net": {"height": int(net["blocks"]), "difficulty": num(net["difficulty"])}, "wallets": out}
+    snap = {"v": 1, "kind": "pool", "at": int(time.time()), "net": {"height": int(net["blocks"]), "difficulty": num(net["difficulty"])}, "wallets": out}
+    pr = probe() if os.environ.get("GM_PROBE", "1") == "1" else None
+    if pr: snap["probe"] = pr
+    return snap
 def send(payload, k, sender=SENDER, url=INGEST):
     body = json.dumps(payload, separators=(",", ":")).encode()
     ts = str(int(time.time())); _ctr[0] = max(_ctr[0] + 1, time.time_ns() // 1_000_000)  # monotonic across restarts
