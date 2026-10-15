@@ -2,9 +2,8 @@
 // Wiring (exact):
 //   import { validPayout, payoutCheck } from "../lib/payout-check.js";
 //   validPool(): add "payout" to optional keys and `|| ("payout" in p && !validPayout(p.payout))`
-//   ingestPool(): if (sender === "umbrel") await payoutCheck(p.payout || [], now, { loadJson, putJson });
-//     loadJson(path) -> parsed JSON or null; putJson(path, obj) -> writes it. Both must use the PRIVATE blob store
-//     (see README) at statusPath(), never a public/guessable URL.
+//   import { makeStore } from "../lib/payout-store.js";  const payoutStore = makeStore();   (private Blob store)
+//   ingestPool(): if (sender === "umbrel") await payoutCheck(p.payout || [], now, payoutStore);
 // Env (Vercel, all SENSITIVE): PAYOUT_EXPECTED_JSON = {"<rig>":[{"h":"<32hex>","from"?:ISO,"until"?:ISO,"label"?:"direct"|"mrr"|"home"}]}
 //   (no renter names: any other key, incl. "note", is rejected), PAYOUT_BLOB_SECRET (64 hex), PAYOUT_STATUS_TOKEN (>=32 chars).
 export const statusPath = () => {

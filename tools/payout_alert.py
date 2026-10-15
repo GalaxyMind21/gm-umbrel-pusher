@@ -22,9 +22,11 @@ try:
     st["_fail"] = 0
 except Exception as e:
     st["_fail"] = st.get("_fail", 0) + 1
+    os.makedirs(os.path.dirname(ST), exist_ok=True); json.dump(st, open(ST, "w"))  # persist BEFORE ntfy so a failing ntfy can't reset it
     if st["_fail"] == 3 or (st["_fail"] > 3 and st["_fail"] % 60 == 0):
-        ntfy("Payout integrity: check failing", f"Status fetch failed {st['_fail']}x in a row ({type(e).__name__}).")
-    os.makedirs(os.path.dirname(ST), exist_ok=True); json.dump(st, open(ST, "w")); raise SystemExit(1)
+        try: ntfy("Payout integrity: check failing", f"Status fetch failed {st['_fail']}x in a row ({type(e).__name__}).")
+        except Exception: pass  # no heartbeat is sent on this path, so Kuma still alerts
+    raise SystemExit(1)
 rigs = {k: v["state"] for k, v in r["rigs"].items()}
 if now - r.get("at", 0) > 300: rigs = {"all rigs": "stale"}
 for rid, s in rigs.items():
