@@ -45,7 +45,7 @@ Raw URLs, wallets and worker names never leave the Umbrel. A changed backup pool
 in the gm-umbrel-store compose, this repo or the image. To compute expected hashes, put the same value in a temp file
 for `tools/payout_expected.py`, compute every rig's hashes, then `shred -u` the file. Rotating = new salt + recompute.
 
-**Vercel** (`vercel/payout-check.js` + `vercel/payout-store.js` → gm-discord-bot `lib/`, `vercel/payout-status.js` → `api/`; add `@vercel/blob` >= 2.3; create a separate private store with `vercel blob create-store --access private` and connect it, OIDC auth): iterates the expected
+**Vercel** (`vercel/payout-check.js` + `vercel/payout-store.js` → gm-discord-bot `lib/`, `vercel/payout-status.js` → `api/`; add `@vercel/blob` >= 2.3; create a separate private store with `vercel blob create-store --access private` and connect it with env prefix PAYOUT_BLOB so it gets its own PAYOUT_BLOB_READ_WRITE_TOKEN and the existing BLOB_READ_WRITE_TOKEN is untouched): iterates the expected
 list AND the pushed rigs. States: `ok`, `mismatch`, `missing` (expected but absent from the push), `unconfigured` (pushed,
 no expectation), `none`, `err`. Every non-ok state alerts (mismatch/missing/unconfigured after 2 pushes ≈ 2 min; none/err ≈ 5 min).
 Env, all marked **sensitive**: `PAYOUT_EXPECTED_JSON` (entries `{h, from?, until?, label?}`, label ∈ direct|mrr|home, no
