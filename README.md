@@ -34,3 +34,18 @@ Emergency revoke: remove the env var on Vercel and redeploy; every push from tha
 ## Updating the image
 Merge to `main` → Actions builds `sha-<commit>` → copy the digest from the run summary → bump the `image:` digest
 and `version` in `gm-umbrel-store/galaxymind-pusher/` (PR) → update the app in the Umbrel UI. Log it in CHANGES.log first.
+
+## Payout-integrity watch (optional, inert until `GM_PAYOUT_SALT` is set)
+Every ~60 s `app/payout.py` reads each `GM_MINERS` rig's **active** pool through the existing read-only calls and adds
+`"payout": [{"id": "<rig>", "h": "<32 hex>"}]` (or `{"id","s":"none"|"err"}`) to the push. `h` = HMAC-SHA256(`GM_PAYOUT_SALT`,
+`host:port|user`)[:32]. Raw URLs, wallets and worker names never leave the Umbrel.
+- Vercel (`vercel/payout-check.js`, `vercel/payout-status.js`, to be merged into gm-discord-bot) compares `h` with
+  `PAYOUT_EXPECTED_JSON` (per rig, optional `from`/`until` windows so rented rigs switch target on their end date).
+  Mismatch on 2 consecutive pushes (~2 min) -> state `mismatch`; `none`/`err` after ~5 min.
+- `tools/payout_alert.py` runs on the box every minute (outbound only), reads the status and sends Olly an ntfy alert,
+  repeats hourly while it persists, sends a recovery notice, and alerts if checks go stale (>5 min).
+- `tools/payout_expected.py` computes expected hashes from the confirmed pool/user per rig (salt read from a file, never printed).
+Go-live order: Vercel accepts `payout` first (old Vercel would reject the new field) -> set `GM_PAYOUT_SALT` on the Umbrel -> box cron.
+| var | value |
+|---|---|
+| `GM_PAYOUT_SALT` | 64 hex, secret, Umbrel app settings only. Same value in the box file used by `tools/payout_expected.py`. |

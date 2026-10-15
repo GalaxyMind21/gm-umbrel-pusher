@@ -5,7 +5,7 @@ Env: GM_HMAC_KEY (secret, from Umbrel app settings), GM_WALLETS (comma list of c
      GM_SENDER (umbrel|box), GM_POOL_URL (default http://host.docker.internal:2019/api),
      GM_INGEST_URL (default https://gm-discord-bot.vercel.app/api/ingest), GM_INTERVAL (default 60), GM_ONCE=1 to run once."""
 import hashlib, hmac, json, os, re, socket, statistics, sys, time, urllib.request
-import miners
+import miners, payout
 POOL = os.environ.get("GM_POOL_URL", "http://host.docker.internal:2019/api").rstrip("/")
 INGEST = os.environ.get("GM_INGEST_URL", "https://gm-discord-bot.vercel.app/api/ingest")
 SENDER = os.environ.get("GM_SENDER", "umbrel")
@@ -74,6 +74,9 @@ def snapshot(ws):
     try: ms = miners.collect(log)
     except Exception as e: log("miners error", type(e).__name__); ms = []
     if ms: snap["miners"] = ms
+    try: po = payout.collect(log)
+    except Exception as e: log("payout error", type(e).__name__); po = []
+    if po: snap["payout"] = po  # inert unless GM_PAYOUT_SALT is set; Vercel must accept "payout" first (see README)
     return snap
 def send(payload, k, sender=SENDER, url=INGEST):
     body = json.dumps(payload, separators=(",", ":")).encode()

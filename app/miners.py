@@ -34,7 +34,7 @@ def _f(x, lo=0, hi=1e9):
     except (TypeError, ValueError): return None
     return round(v, 2) if lo <= v < hi else None
 def _clean(d): return {k: v for k, v in d.items() if v is not None}
-def axeos(host):
+def axeos_raw(host):
     t0 = time.monotonic()
     with _HTTP.open(urllib.request.Request(f"http://{host}/api/system/info", headers={"user-agent": "gm-pusher/1"}), timeout=5) as r:
         b = b""
@@ -43,7 +43,9 @@ def axeos(host):
             c = r.read(16384)
             if not c: break
             b += c
-        i = json.loads(b)
+        return json.loads(b)
+def axeos(host):
+    i = axeos_raw(host)
     temps = [t for t in (_f(i.get(k), -40, 150) for k in ("temp", "temp2")) if t is not None]
     return _clean({"temp_max_c": max(temps) if temps else None, "vr_temp_c": _f(i.get("vrTemp"), -40, 200),
         "fan_rpm": _f(i.get("fanrpm"), 0, 30000), "fan_pct": _f(i.get("fanspeed"), 0, 101), "power_w": _f(i.get("power"), 0, 10000),
