@@ -5,6 +5,7 @@ Env: GM_HMAC_KEY (secret, from Umbrel app settings), GM_WALLETS (comma list of c
      GM_SENDER (umbrel|box), GM_POOL_URL (default http://host.docker.internal:2019/api),
      GM_INGEST_URL (default https://gm-discord-bot.vercel.app/api/ingest), GM_INTERVAL (default 60), GM_ONCE=1 to run once."""
 import hashlib, hmac, json, os, re, socket, statistics, sys, time, urllib.request
+import miners
 POOL = os.environ.get("GM_POOL_URL", "http://host.docker.internal:2019/api").rstrip("/")
 INGEST = os.environ.get("GM_INGEST_URL", "https://gm-discord-bot.vercel.app/api/ingest")
 SENDER = os.environ.get("GM_SENDER", "umbrel")
@@ -70,6 +71,9 @@ def snapshot(ws):
     snap = {"v": 1, "kind": "pool", "at": int(time.time()), "net": {"height": int(net["blocks"]), "difficulty": num(net["difficulty"])}, "wallets": out}
     pr = probe() if os.environ.get("GM_PROBE", "1") == "1" else None
     if pr: snap["probe"] = pr
+    try: ms = miners.collect(log)
+    except Exception as e: log("miners error", type(e).__name__); ms = []
+    if ms: snap["miners"] = ms
     return snap
 def send(payload, k, sender=SENDER, url=INGEST):
     body = json.dumps(payload, separators=(",", ":")).encode()
