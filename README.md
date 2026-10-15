@@ -34,3 +34,35 @@ Emergency revoke: remove the env var on Vercel and redeploy; every push from tha
 ## Updating the image
 Merge to `main` → Actions builds `sha-<commit>` → copy the digest from the run summary → bump the `image:` digest
 and `version` in `gm-umbrel-store/galaxymind-pusher/` (PR) → update the app in the Umbrel UI. Log it in CHANGES.log first.
+
+## Payout-integrity watch (optional, inert until `GM_PAYOUT_SALT` is set)
+Every ~60 s `app/payout.py` reads EVERY pool slot of each `GM_MINERS` rig, in order (AxeOS: primary, fallback, useFallbackStratum flag; cgminer: all
+pools by Priority), through the existing read-only calls, and pushes `"payout": [{"id":"<rig>","h":"<32 hex>"}]`
+(or `{"id","s":"none"|"err"}`). `h` = HMAC-SHA256(salt, ordered `host:port|user` slots joined by newline)[:32].
+Raw URLs, wallets and worker names never leave the Umbrel. A changed backup pool alerts just like a changed primary.
+
+**Salt.** `GM_PAYOUT_SALT` = exactly 64 lowercase hex. Set it ONLY in the Umbrel UI (app → Settings → environment), never
+in the gm-umbrel-store compose, this repo or the image. To compute expected hashes, put the same value in a temp file
+for `tools/payout_expected.py`, compute every rig's hashes, then `shred -u` the file. Rotating = new salt + recompute.
+
+**Vercel** (`vercel/payout-check.js` + `vercel/payout-store.js` → gm-discord-bot `lib/`, `vercel/payout-status.js` → `api/`; add `@vercel/blob` >= 2.3; create a separate private store with `vercel blob create-store --access private` and connect it with env prefix PAYOUT_BLOB so it gets its own PAYOUT_BLOB_READ_WRITE_TOKEN and the existing BLOB_READ_WRITE_TOKEN is untouched): iterates the expected
+list AND the pushed rigs. States: `ok`, `mismatch`, `missing` (expected but absent from the push), `unconfigured` (pushed,
+no expectation), `none`, `err`. Every non-ok state alerts (mismatch/missing/unconfigured after 2 pushes ≈ 2 min; none/err ≈ 5 min).
+Env, all marked **sensitive**: `PAYOUT_EXPECTED_JSON` (entries `{h, from?, until?, label?}`, label ∈ direct|mrr|home, no
+renter names; anything else is rejected), `PAYOUT_BLOB_SECRET` (64 hex; status blob lives at `pi/<secret>/status.json`, in a
+private Blob store, never listed or linked), `PAYOUT_STATUS_TOKEN` (≥32 chars).
+
+**Expected values policy.** The MRR configuration of each rig (stratum host `*.miningrigrentals.com` with user
+`GalaxyMind.<rig id>`, the full ordered slot set) is a permanent entry with no window (`label: "mrr"`). Direct rentals get
+a `label: "direct"` entry with `from`/`until` matching the rental (Black Pearl until 2026-12-01, Marshall until 2026-11-08,
+UTC); when it lapses only the MRR entry matches, so a rig left on the renter's pool after the end date alerts.
+
+**Alerting (primary, no agent in the path).** Uptime Kuma JSON-query monitor: GET `https://gm-discord-bot.vercel.app/api/payout-status`,
+header `Authorization: Bearer <PAYOUT_STATUS_TOKEN>`, query `all_ok`, expected value `true`, interval 60 s, retries 1,
+notification = Olly's ntfy. `all_ok` is false on any non-ok rig or if the status is >5 min old (pusher or Vercel silent),
+and a fetch error/401 is also a Kuma failure. Kuma polls outbound; nothing connects into the home network.
+**Fallback** `tools/payout_alert.py` (box cron, 1 min): per-rig ntfy text, hourly repeat, recovery notices, alerts after 3
+consecutive fetch failures; its Kuma heartbeat push URL is mandatory so a dead poller alerts.
+
+Go-live order: Vercel accepts `payout` first (old Vercel rejects the field) → expected values + Kuma monitor →
+`GM_PAYOUT_SALT` in the Umbrel UI → image update (CHANGES.log first).
