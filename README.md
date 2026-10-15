@@ -34,3 +34,10 @@ Emergency revoke: remove the env var on Vercel and redeploy; every push from tha
 ## Updating the image
 Merge to `main` → Actions builds `sha-<commit>` → copy the digest from the run summary → bump the `image:` digest
 and `version` in `gm-umbrel-store/galaxymind-pusher/` (PR) → update the app in the Umbrel UI. Log it in CHANGES.log first.
+
+## Home-rig switcher (disabled by default)
+`switcher.py` lets the pusher apply direct-rental pool switches to home miners. Off unless `GM_SWITCH_ENABLED=1`.
+Outbound only: it polls `GM_SWITCH_URL` with an HMAC-signed request, verifies the HMAC on the returned job list, and only
+acts on allowlisted rigs (`GM_SWITCH_RIGS`) inside 192.168.4.0/24. Titan/Bitaxe: AxeOS `PATCH /api/system` + restart, then
+verifies `/api/system/info`. Avalon: cgminer API `addpool`/`switchpool` on the miner's TCP 4028 (requires write access in the
+miner's API allow list), then verifies via `pools`. Failures are reported back and pushed to `GM_NTFY_URL` if set. No listener, no ports.
