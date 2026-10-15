@@ -1,16 +1,17 @@
 """Home-rig pool switcher for the Galaxy Mind pusher. DISABLED unless GM_SWITCH_ENABLED=1.
 Outbound only: polls Vercel for HMAC-signed switch jobs, applies them to LAN miners, verifies, reports back.
-Nothing listens; no ports are opened. LAN targets are restricted to 192.168.4.0/24 and an explicit allowlist.
+Nothing listens; no ports are opened. LAN targets are restricted to GM_SWITCH_LAN (home subnet from app settings) and an explicit allowlist.
 
 Env:
   GM_SWITCH_ENABLED=1                     opt-in flag (default off)
-  GM_SWITCH_RIGS='{"titan":{"type":"axeos","host":"192.168.4.X"},"avalon1":{"type":"cgminer","host":"192.168.4.Y"}}'
+  GM_SWITCH_RIGS='{"titan":{"type":"axeos","host":"<lan-ip>"},"avalon1":{"type":"cgminer","host":"<lan-ip>"}}'
+  GM_SWITCH_LAN=<home subnet CIDR>          required; rigs outside it are refused
   GM_SWITCH_URL (default https://gm-discord-bot.vercel.app/api/switch-jobs)
   GM_NTFY_URL / GM_NTFY_TOKEN             optional LAN ntfy fallback (e.g. http://host.docker.internal:13119/<topic>)
 Job (inside signed envelope): {"id": hex12, "rig": id, "url": "stratum+tcp://host:port", "user": str, "pass": str, "exp": unix}
 """
 import hashlib, hmac, ipaddress, json, os, re, socket, time, urllib.request
-LAN = ipaddress.ip_network("192.168.4.0/24")
+LAN = ipaddress.ip_network(os.environ.get("GM_SWITCH_LAN", "127.0.0.1/32"))  # home subnet, set in app settings
 URL_RE = re.compile(r"^stratum\+(tcp|ssl)://([A-Za-z0-9.-]{3,80}):(\d{2,5})$")
 USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,90}$"); PASS_RE = re.compile(r"^[A-Za-z0-9.,=_-]{0,40}$")
 SWITCH_URL = os.environ.get("GM_SWITCH_URL", "https://gm-discord-bot.vercel.app/api/switch-jobs")
