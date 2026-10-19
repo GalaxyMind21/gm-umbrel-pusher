@@ -1,5 +1,5 @@
 """Read-only local miner stats for the Galaxy Mind pusher. OFF unless GM_MINERS is set.
-Reads ONLY: AxeOS GET /api/system/info, cgminer API summary/stats/pools on TCP 4028 (non-privileged read commands).
+Reads ONLY: AxeOS GET /api/system/info, cgminer API summary/stats/estats/pools on TCP 4028 (non-privileged read commands).
 Never writes, restarts or reconfigures a miner. Outbound from the container only; nothing listens.
 Output is a strict numeric allowlist: no IPs, MACs, serials, hostnames, pool URLs, wallets or worker names leave here.
 The only non-numeric values are two version strings that must match a strict pattern (cgminer x.y.z and a firmware
@@ -70,6 +70,17 @@ def _cg(host, cmd, t0):
             if b"\x00" in c: break  # cgminer terminates each reply with NUL
     return json.loads(b.split(b"\x00", 1)[0].decode(errors="replace").replace("}{", "},{"))
 _TOK = re.compile(r"([A-Za-z][A-Za-z0-9_]*)\[([^\]]*)\]")
+def _tokens(reply):
+    tok = {}
+    for st in reply.get("STATS") or []:
+        for v in st.values():
+            if isinstance(v, str) and "[" in v: tok.update({k: val for k, val in _TOK.findall(v)})
+    return tok
+_PINGRE = re.compile(r"^\s*(\d{1,9})(?:\.\d+)?\s*$")
+def _ping(v):
+    """The miner's own ping to its active pool, from Avalon PING[n] (ms). Whole ms, clamped to 0..60000; None if absent or not a number."""
+    m = _PINGRE.match(str(v)) if v is not None else None
+    return min(int(m.group(1)), 60000) if m else None
 _CGVER = re.compile(r"^\d{1,3}(\.\d{1,3}){1,2}$"); _FWVER = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 _DOTTED4 = re.compile(r"\d+\.\d+\.\d+\.\d+")  # anything shaped like an IPv4 address is refused, even as a version
 _URL = re.compile(r"^(?:[a-z0-9+.-]+://)?([^/:\s]+)(?::(\d{1,5}))?/?$", re.I)
@@ -109,10 +120,7 @@ def cgminer(host, extra=None):
            "hw_err": _f(s.get("Hardware Errors")), "hashrate_ths": _f((_f(s.get("MHS 5s")) or 0) / 1e6) if s.get("MHS 5s") is not None else None,
            "found_blocks": _f(s.get("Found Blocks")), "discarded": _f(s.get("Discarded")), "get_fail": _f(s.get("Get Failures")),
            "remote_fail": _f(s.get("Remote Failures"))}
-    tok = {}
-    for st in _cg(host, "stats", t0).get("STATS") or []:
-        for v in st.values():
-            if isinstance(v, str) and "[" in v: tok.update({k: val for k, val in _TOK.findall(v)})
+    tok = _tokens(_cg(host, "stats", t0))
     num = lambda k, lo=0, hi=1e6: _f(tok.get(k, "").split()[0] if tok.get(k, "").strip() else None, lo, hi)
     fans = [x for x in (num(f"Fan{n}", 0, 30000) for n in range(1, 5)) if x]
     out.update({"temp_max_c": num("TMax", -40, 150), "temp_avg_c": num("TAvg", -40, 150), "fan_rpm": max(fans) if fans else None,
@@ -124,6 +132,9 @@ def cgminer(host, extra=None):
     when = _f(((pr.get("STATUS") or [{}])[0]).get("When"), 0, 1e11)
     act = [p for p in pools if p.get("Stratum Active")]
     out["pool_ok"] = 1 if act and act[0].get("Status") == "Alive" else 0 if pools else None
+    try: est = _tokens(_cg(host, "estats", t0))
+    except Exception: est = {}  # estats is optional; fall back to the PING the stats reply carries
+    pg = _ping(est.get("PING")); out["pool_ping_ms"] = pg if pg is not None else _ping(tok.get("PING"))
     if act:
         out["last_share_s"] = _age(act[0].get("Last Share Time"), out["uptime_s"], when)
         out["stratum_diff"] = _f(act[0].get("Stratum Difficulty"), 0, 1e15)

@@ -43,6 +43,8 @@ nothing shaped like an IP address); and `pools` = up to 3 slots in priority orde
 (`prio, active, alive, acc, rej, stale, last_share_s, diff`). With `GM_SLOT_KEY` set, each slot also carries
 `h` = HMAC-SHA256(key, `"gm-slot.v1\n" + "host:port|user"`)[:32] (same canonical form as the payout watch). Vercel compares
 `h` with the renter's own `/pool` requests so it can show them their own pool URL and label every other slot "Backup pool".
-No URL, worker, password, MAC, serial or IP leaves the Umbrel. No ping/latency figure is sent for renters.
-**Deploy order:** Vercel must accept `ver`/`pools` and the new keys first (older Vercel rejects them and every push fails).
+`m.pool_ping_ms` is the miner's own ping to its pool as the Avalon reports it (`PING[n]` in `estats`, falling back to
+`stats`): whole ms, clamped to 0..60000, omitted when absent. We never measure it ourselves.
+No URL, worker, password, MAC, serial or IP leaves the Umbrel.
+**Deploy order:** Vercel must accept `ver`/`pools` and the new keys (including `pool_ping_ms`) first (older Vercel rejects them and every push fails).
 Tests: `python3 -m unittest discover -s tests` (fake cgminer replies, no network).

@@ -64,4 +64,30 @@ class CgminerTest(unittest.TestCase):
             try: extra = {}; miners.cgminer("h", extra); self.assertNotIn("ver", extra)
             finally: FAKE["version"] = VERSION
 
+    def _with(self, cmd, reply, fn):
+        had = cmd in FAKE; prev = FAKE.get(cmd); FAKE[cmd] = reply
+        try: return fn()
+        finally:
+            if had: FAKE[cmd] = prev
+            else: FAKE.pop(cmd, None)
+
+    def test_pool_ping_from_estats(self):
+        est = {"STATS": [{"MM ID0": "Ver[Q-25052801] PING[33] TMax[71]"}]}
+        m = self._with("estats", est, lambda: miners.cgminer("h"))
+        self.assertEqual(m["pool_ping_ms"], 33); self.assertIsInstance(m["pool_ping_ms"], int)
+
+    def test_pool_ping_falls_back_to_stats(self):
+        st = {"STATS": [{"MM ID0": STATS["STATS"][0]["MM ID0"] + " PING[10]"}]}
+        self.assertEqual(self._with("stats", st, lambda: miners.cgminer("h"))["pool_ping_ms"], 10)  # no estats reply at all
+        est = {"STATS": [{"MM ID0": "Ver[Q-25052801] TMax[71]"}]}  # estats without PING
+        self.assertEqual(self._with("stats", st, lambda: self._with("estats", est, lambda: miners.cgminer("h")))["pool_ping_ms"], 10)
+
+    def test_pool_ping_missing_bad_or_huge(self):
+        self.assertNotIn("pool_ping_ms", miners.cgminer("h"))
+        for raw, want in (("abc", None), ("-5", None), ("", None), ("12.9", 12), ("999999", 60000), ("0", 0)):
+            est = {"STATS": [{"MM ID0": "PING[%s]" % raw}]}
+            m = self._with("estats", est, lambda: miners.cgminer("h"))
+            if want is None: self.assertNotIn("pool_ping_ms", m, raw)
+            else: self.assertEqual(m["pool_ping_ms"], want, raw)
+
 if __name__ == "__main__": unittest.main()
