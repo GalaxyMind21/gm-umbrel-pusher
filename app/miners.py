@@ -170,7 +170,7 @@ def cgminer(host, extra=None):
                         "last_share_s": _age(p.get("Last Share Time"), out["uptime_s"], when), "diff": _f(p.get("Stratum Difficulty"), 0, 1e15)})
             h = slot_fp(key, p.get("URL"), p.get("User"))
             if h: d["h"] = h
-            ph = slot_display(p.get("URL"))
+            ph = slot_display(p.get("URL")) if p.get("Stratum Active") else None  # active pool only: backup hosts stay here
             if ph: d["ph"] = ph
             sl.append(d)
         if sl: extra["pools"] = sl

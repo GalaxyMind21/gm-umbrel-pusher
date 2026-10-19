@@ -94,7 +94,7 @@ class CgminerTest(unittest.TestCase):
     def test_slot_display(self):
         extra = {}; miners.cgminer("h", extra)
         self.assertEqual(extra["pools"][0]["ph"], "stratum+tcp://pool.example.com:3333")  # host lowercased, no user
-        self.assertEqual(extra["pools"][1]["ph"], "ip")                                    # raw IP hidden
+        self.assertNotIn("ph", extra["pools"][1])                                          # standby slot: no pool display sent
         sd = miners.slot_display
         self.assertEqual(sd("stratum+tcp://" + DOC_A + ":2018"), "ip")                     # public-range IP, even on the node port
         self.assertEqual(sd("stratum+tcp://" + ".".join(["192", "168", "0", "9"]) + ":2018"), "node")
