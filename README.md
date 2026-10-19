@@ -45,6 +45,9 @@ nothing shaped like an IP address); and `pools` = up to 3 slots in priority orde
 `h` with the renter's own `/pool` requests so it can show them their own pool URL and label every other slot "Backup pool".
 `m.pool_ping_ms` is the miner's own ping to its pool as the Avalon reports it (`PING[n]` in `estats`, falling back to
 `stats`): whole ms, clamped to 0..60000, omitted when absent. We never measure it ourselves.
-No URL, worker, password, MAC, serial or IP leaves the Umbrel.
-**Deploy order:** Vercel must accept `ver`/`pools` and the new keys (including `pool_ping_ms`) first (older Vercel rejects them and every push fails).
+The active slot only (never standby/backup slots) may also carry `ph`, a sanitized pool display: `"node"` (a private-address or LAN-name host on the local pool's
+stratum port 2018, i.e. the Galaxy Mind node), `"ip"` (any other raw IP or private/LAN host, hidden), or
+`stratum+tcp://<public hostname>:<port>` with no user or password. Anything that could carry an address in its name is `"ip"`.
+No worker, password, MAC, serial or IP leaves the Umbrel.
+**Deploy order:** Vercel must accept `ver`/`pools` and the new keys (including `pool_ping_ms` and slot `ph`) first (older Vercel rejects them and every push fails).
 Tests: `python3 -m unittest discover -s tests` (fake cgminer replies, no network).

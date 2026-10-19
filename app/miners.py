@@ -98,6 +98,28 @@ def canon(url, user):
 def slot_fp(key, url, user):
     c = canon(url, user)
     return hmac.new(key, ("gm-slot.v1\n" + c).encode(), hashlib.sha256).hexdigest()[:32] if key and c else None
+_HOST = re.compile(r"^(?=.*[a-z])[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
+_PRIVSUFFIX = (".local", ".lan", ".home", ".internal", ".localdomain", ".home.arpa", ".ts.net")
+NODE_PORTS = {"2018"}  # the local Galaxy Mind Public Pool stratum port
+def slot_display(url):
+    """Sanitized pool display for a slot. Never a user, password or IP.
+    "node" = a private-address or LAN-name host on the local pool's stratum port (our Galaxy Mind node);
+    "ip"   = any other raw IP (v4 or v6) or private/LAN host, hidden;
+    "stratum+tcp://<public hostname>:<port>" (or stratum+ssl) otherwise; None if the URL can't be parsed."""
+    u = str(url or "").strip()
+    if re.match(r"^(?:[a-z0-9+.-]+://)?\[[0-9a-f:.]+\]", u, re.I): return "ip"  # bracketed IPv6
+    m = _URL.match(u)
+    if not m or not m.group(2): return None
+    host, port = m.group(1).lower().strip("[]").rstrip("."), m.group(2)
+    scheme = "stratum+ssl" if u.lower().startswith("stratum+ssl://") else "stratum+tcp"
+    try: ip = ipaddress.ip_address(host)
+    except ValueError: ip = None
+    if ip is not None: return "node" if (ip.version == 4 and any(ip in n for n in _RFC1918) or ip.is_loopback) and port in NODE_PORTS else "ip"
+    if "." not in host or host.endswith(_PRIVSUFFIX) or host in ("localhost", "host.docker.internal"):
+        return "node" if port in NODE_PORTS else "ip"
+    if not _HOST.match(host) or len(host) > 80 or _DOTTED4.search(host.replace("-", ".")) or re.search(r"(^|[.-])(0x)?[0-9a-f]{8}([.-]|$)|(^|\.)\d{8,10}(\.|$)", host) or "--" in host:
+        return "ip"  # anything that could carry an address in its name
+    return "%s://%s:%s" % (scheme, host, port)
 def _age(lst, elapsed, when):
     """Seconds since a pool's last share. cgminer reports unix time; some Avalon builds report seconds since start."""
     v = _f(lst, 0, 1e11)
@@ -148,6 +170,8 @@ def cgminer(host, extra=None):
                         "last_share_s": _age(p.get("Last Share Time"), out["uptime_s"], when), "diff": _f(p.get("Stratum Difficulty"), 0, 1e15)})
             h = slot_fp(key, p.get("URL"), p.get("User"))
             if h: d["h"] = h
+            ph = slot_display(p.get("URL")) if p.get("Stratum Active") else None  # active pool only: backup hosts stay here
+            if ph: d["ph"] = ph
             sl.append(d)
         if sl: extra["pools"] = sl
         try:
