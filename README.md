@@ -16,6 +16,7 @@ Discord bot data and posts #rig-status alerts. Nothing listens; no ports, no UI,
 | `GM_HMAC_KEY` | Umbrel sender key (64 hex). Secret. Matches Vercel env `INGEST_KEY_UMBREL`. |
 | `GM_WALLETS` | Comma list of customer payout wallets to read from Public Pool (max 5). Not secret. |
 | `GM_SENDER` | `umbrel` (set in compose) |
+| `GM_SLOT_KEY` | Optional. Exactly 64 lowercase hex. Secret. Matches Vercel env `POOL_SLOT_KEY`. Enables per-pool-slot fingerprints for renter `/status` (see below). |
 | `GM_POOL_URL` | `http://host.docker.internal:2019/api` (host-published Public Pool port; set in compose) |
 
 ## Signing protocol
@@ -34,3 +35,14 @@ Emergency revoke: remove the env var on Vercel and redeploy; every push from tha
 ## Updating the image
 Merge to `main` → Actions builds `sha-<commit>` → copy the digest from the run summary → bump the `image:` digest
 and `version` in `gm-umbrel-store/galaxymind-pusher/` (PR) → update the app in the Umbrel UI. Log it in CHANGES.log first.
+
+## Renter status fields (cgminer rigs, read-only)
+`miners.py` also sends, per cgminer rig: found blocks, discarded work, get/remote failures, seconds since the active
+pool's last share, and the active stratum difficulty (all numbers, in `m`); `ver` = `{cgminer, fw}` (strict patterns,
+nothing shaped like an IP address); and `pools` = up to 3 slots in priority order with numbers only
+(`prio, active, alive, acc, rej, stale, last_share_s, diff`). With `GM_SLOT_KEY` set, each slot also carries
+`h` = HMAC-SHA256(key, `"gm-slot.v1\n" + "host:port|user"`)[:32] (same canonical form as the payout watch). Vercel compares
+`h` with the renter's own `/pool` requests so it can show them their own pool URL and label every other slot "Backup pool".
+No URL, worker, password, MAC, serial or IP leaves the Umbrel. No ping/latency figure is sent for renters.
+**Deploy order:** Vercel must accept `ver`/`pools` and the new keys first (older Vercel rejects them and every push fails).
+Tests: `python3 -m unittest discover -s tests` (fake cgminer replies, no network).
