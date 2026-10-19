@@ -41,8 +41,9 @@ class CgminerTest(unittest.TestCase):
 
     def test_no_urls_ips_users_macs_leave(self):
         extra = {}; m = miners.cgminer("h", extra); out = json.dumps({"m": m, **extra})
-        for bad in ("example", DOC_A, "bc1q", "backup.worker", "stratum+", "://", "00:11:22", "0123456789abcdef", "Pool."):
+        for bad in (DOC_A, "bc1q", "backup.worker", "00:11:22", "0123456789abcdef", "Pool."):
             self.assertNotIn(bad, out)
+        self.assertTrue(all(p.get("ph") in (None, "node", "ip") or re.fullmatch(r"stratum\+(tcp|ssl)://[a-z0-9.-]+:\d+", p["ph"]) for p in extra.get("pools", [])))
         self.assertIsNone(IPV4.search(out)); self.assertIsNone(IPV6.search(out))
 
     def test_fingerprint_canonical(self):
@@ -89,5 +90,23 @@ class CgminerTest(unittest.TestCase):
             m = self._with("estats", est, lambda: miners.cgminer("h"))
             if want is None: self.assertNotIn("pool_ping_ms", m, raw)
             else: self.assertEqual(m["pool_ping_ms"], want, raw)
+
+    def test_slot_display(self):
+        extra = {}; miners.cgminer("h", extra)
+        self.assertEqual(extra["pools"][0]["ph"], "stratum+tcp://pool.example.com:3333")  # host lowercased, no user
+        self.assertEqual(extra["pools"][1]["ph"], "ip")                                    # raw IP hidden
+        sd = miners.slot_display
+        self.assertEqual(sd("stratum+tcp://" + DOC_A + ":2018"), "ip")                     # public-range IP, even on the node port
+        self.assertEqual(sd("stratum+tcp://" + ".".join(["192", "168", "0", "9"]) + ":2018"), "node")
+        self.assertEqual(sd("stratum+tcp://" + ".".join(["10", "0", "0", "9"]) + ":3333"), "ip")
+        self.assertEqual(sd("stratum+tcp://umbrel.local:2018"), "node")
+        self.assertEqual(sd("stratum+tcp://nas.lan:3333"), "ip")
+        self.assertEqual(sd("stratum+tcp://[2001:db8::1]:3333"), "ip")
+        self.assertEqual(sd("stratum+ssl://Stratum.Example.org:443"), "stratum+ssl://stratum.example.org:443")
+        for h in ("8-8-8-8.sslip.io", "pool.c0a80001.example.com", "134744072.example.com", "2001-db8-0-0--1.example.com"):
+            self.assertEqual(sd("stratum+tcp://%s:3333" % h), "ip", h)
+        self.assertIsNone(sd("stratum+tcp://pool.example.com")); self.assertIsNone(sd(""))
+        out = json.dumps(extra["pools"])
+        for bad in (DOC_A, "bc1q", "backup.worker", "Pool."): self.assertNotIn(bad, out)
 
 if __name__ == "__main__": unittest.main()
