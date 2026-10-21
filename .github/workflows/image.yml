@@ -2,6 +2,8 @@ name: image
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,14 +15,16 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
       - run: PYTHONPYCACHEPREFIX=/tmp/pyc python3 -m py_compile app/pusher.py && test ! -d app/__pycache__
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
-      - uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+      - if: github.event_name != 'pull_request'
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
       - id: b
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           provenance: false
           tags: ghcr.io/galaxymind21/gm-umbrel-pusher:sha-${{ github.sha }}
-      - run: echo "DIGEST ${{ steps.b.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY" && echo "DIGEST ${{ steps.b.outputs.digest }}"
+      - if: github.event_name != 'pull_request'
+        run: echo "DIGEST ${{ steps.b.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY" && echo "DIGEST ${{ steps.b.outputs.digest }}"
